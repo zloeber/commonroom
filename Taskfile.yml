@@ -1,0 +1,49 @@
+version: "3"
+
+tasks:
+  install:
+    cmds:
+      - uv sync --all-extras
+
+  test:
+    cmds:
+      - uv run pytest
+
+  test:watch:
+    cmds:
+      - uv run pytest -f
+
+  lint:
+    cmds:
+      - uv run ruff check src tests
+
+  format:
+    cmds:
+      - uv run ruff format src tests
+
+  format:check:
+    cmds:
+      - uv run ruff format --check src tests
+
+  typecheck:
+    cmds:
+      - uv run python -m compileall src
+
+  check:
+    deps: [format:check, lint, typecheck, test]
+
+  run:
+    cmds:
+      - uv run commonroom status --workspace ./workspace.md --json
+
+  serve:
+    cmds:
+      - uv run commonroom serve ./workspace.md
+
+  docs:
+    cmds:
+      - uv run python -c "print('Docs: README.md and docs/architecture.md')"
+
+  clean:
+    cmds:
+      - rm -rf .pytest_cache .ruff_cache .mypy_cache dist build

@@ -1,0 +1,5 @@
+[tools]
+python = "3.12"
+uv = "latest"
+ruff = "latest"
+"ubi:go-task/task" = "latest"
