@@ -23,6 +23,10 @@ dev = [
 [project.scripts]
 commonroom = "commonroom.cli:main"
 
+[project.entry-points."commonroom.transports"]
+loopback = "commonroom.transport.loopback:plugin"
+tailcat = "commonroom.transport.plugins.tailcat:plugin"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/commonroom"]
 

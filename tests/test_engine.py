@@ -62,7 +62,7 @@ def test_stale_commit_returns_structured_conflict(tmp_path: Path) -> None:
         engine.commit(b["participant_id"], 1, "stale", "# Architecture\ntwo\n")
 
     payload = exc.value.payload
-    assert payload["error"] == "version_conflict"
+    assert payload["error"] == "stale_version"
     assert payload["current_version"] == 2
     assert "attempted@v1" in payload["diff"]
 

@@ -1,24 +1,21 @@
 {
   "name": "commonroom",
-  "description": "Collaborate in a local-first shared workspace with humans and agents.",
+  "description": "Join a Commonroom, observe it, lease a region, and propose changes.",
+  "skill": "skills/commonroom/SKILL.md",
   "discovery": {
     "well_known": "/.well-known/agent-workspace",
     "skills": "/skills",
     "protocol": "/protocol"
   },
   "workflow": [
-    "Call workspace.status or workspace.summary first",
-    "Use workspace.read with bounded max_lines/max_bytes",
-    "Use workspace.checkout before edits",
-    "Create workspace.propose with base_version",
-    "Wait for proposal review decision",
-    "Commit with workspace.commit",
-    "Handle 409 conflicts by fetching status/diff and reconciling",
-    "Use workspace.observe or workspace.history to track activity"
-  ],
-  "collaboration_rules": [
-    "Humans and agents are peers in the participant model",
-    "Do not overwrite stale versions",
-    "Release leases when done"
+    "Decode commonroom://join/<capability>",
+    "Dial the first installed transport hint",
+    "POST /session/join with the invitation secret",
+    "workspace.status then workspace.summary",
+    "workspace.checkout a region",
+    "workspace.propose against base_version",
+    "Wait for approval",
+    "workspace.commit the proposal id",
+    "On stale_version, read the diff and propose again"
   ]
 }
