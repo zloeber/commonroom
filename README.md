@@ -1,18 +1,8 @@
 # Commonroom™
-<!-- agent-entrypoint:
-intent: executable-tool
-primary_workflow: usage-first
-install: uv tool install -U commonroom
-authoritative:
-  - ./AGENTS.md
-  - ./docs/architecture.md
-  - ./skills/commonroom/SKILL.md
--->
-<div align="center">
-<a href="https://github.com/zloeber/commonroom">
-<img src="docs/inc/logo-commonroom.png" width="520" alt="Commonroom™ logo">
-</a>
-</div>
+
+
+
+![Commonroom™ logo](docs/inc/logo-commonroom.png)
 
 Commonroom opens a temporary room around something you already have on your computer. Another person, or an agent acting for them, can enter, see who is working, reserve a section, and propose changes. The file stays yours.
 
@@ -30,6 +20,8 @@ Or:
 ```bash
 uv sync --all-extras
 ```
+
+
 
 ## Open a room
 
