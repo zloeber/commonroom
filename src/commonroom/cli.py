@@ -12,7 +12,7 @@ from typing import Any
 
 from commonroom.client import http_exchange
 from commonroom.engine import WorkspaceEngine
-from commonroom.errors import CommonroomError
+from commonroom.errors import CommonroomError, InvalidRequest, UnsupportedVersion
 from commonroom.protocol import decode_invitation
 from commonroom.serving import start_room
 from commonroom.transport.registry import connect_invitation
@@ -22,6 +22,7 @@ COMMANDS = {
     "status",
     "invite",
     "join",
+    "call",
     "participants",
     "leases",
     "proposals",
@@ -73,6 +74,13 @@ def _build_parser() -> argparse.ArgumentParser:
     join.add_argument("--hold", action="store_true")
     join.add_argument("--no-hold", action="store_true")
     join.add_argument("--json", action="store_true", dest="as_json")
+
+    call = subparsers.add_parser("call", help="Send one request through an invitation")
+    call.add_argument("invite")
+    call.add_argument("method", choices=["GET", "POST", "get", "post"])
+    call.add_argument("path")
+    call.add_argument("--session", default=None)
+    call.add_argument("--body", default=None, help="JSON request body")
 
     for name, help_text in (
         ("participants", "List participants"),
@@ -146,10 +154,14 @@ def _serve(args: argparse.Namespace) -> int:
 def _local(args: argparse.Namespace) -> int:
     if args.command == "join" and _is_remote(args.invite):
         return _join_remote(args)
+    if args.command == "call":
+        return _call_remote(args)
     engine = WorkspaceEngine(args.workspace)
     try:
         if args.command == "status":
-            return _emit(engine.status(), args.as_json, _status_text)
+            payload = engine.status()
+            payload["listener"] = engine.connection_diagnostics()["listener"]
+            return _emit(payload, args.as_json, _status_text)
         if args.command == "invite":
             capabilities = [item.strip() for item in args.capabilities.split(",") if item.strip()]
             payload = engine.create_invite(
@@ -180,7 +192,7 @@ def _local(args: argparse.Namespace) -> int:
 
 
 def _join_remote(args: argparse.Namespace) -> int:
-    document = decode_invitation(args.invite)
+    document = _invitation_document(args.invite)
     plugin, connection, hint = connect_invitation(document)
     try:
         status, body = http_exchange(
@@ -200,6 +212,21 @@ def _join_remote(args: argparse.Namespace) -> int:
         print(json.dumps(body, indent=2))
         plugin.close()
         return 1
+    if body.get("workspace_id") != document["workspace_id"]:
+        session_id = body.get("session_id")
+        plugin.close()
+        if session_id:
+            _remote(document, "POST", "/workspace/leave", session=str(session_id))
+        print(
+            json.dumps(
+                {
+                    "error": "invalid_request",
+                    "message": "session workspace does not match the invitation",
+                },
+                indent=2,
+            )
+        )
+        return 1
     if args.as_json:
         print(json.dumps(body, indent=2))
     else:
@@ -214,6 +241,54 @@ def _join_remote(args: argparse.Namespace) -> int:
             pass
     plugin.close()
     return 0
+
+
+def _call_remote(args: argparse.Namespace) -> int:
+    if not _is_remote(args.invite):
+        raise InvalidRequest("call requires a commonroom:// invitation")
+    document = _invitation_document(args.invite)
+    method = args.method.upper()
+    path = str(args.path)
+    if not path.startswith("/") or path.startswith("//"):
+        raise InvalidRequest("path must be a Commonroom HTTP path")
+    body = None
+    if args.body is not None:
+        try:
+            body = json.loads(args.body)
+        except json.JSONDecodeError as exc:
+            raise InvalidRequest("body must be JSON") from exc
+        if not isinstance(body, dict):
+            raise InvalidRequest("body must be a JSON object")
+    status, payload = _remote(document, method, path, body=body, session=args.session)
+    print(json.dumps({"status": status, "body": payload}, indent=2))
+    return 0 if 200 <= status < 300 else 1
+
+
+def _remote(
+    document: dict[str, Any],
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+    session: str | None = None,
+) -> tuple[int, Any]:
+    plugin, connection, _hint = connect_invitation(document)
+    headers = {"Authorization": f"Bearer {session}"} if session else None
+    try:
+        return http_exchange(connection, method, path, json_body=body, headers=headers)
+    finally:
+        connection.close()
+        plugin.close()
+
+
+def _invitation_document(value: str) -> dict[str, Any]:
+    try:
+        return decode_invitation(value)
+    except ValueError as exc:
+        text = str(exc)
+        if text == "unsupported invitation version":
+            raise UnsupportedVersion(text) from exc
+        raise InvalidRequest(text) from exc
 
 
 def _is_remote(value: str) -> bool:
@@ -231,8 +306,13 @@ def _emit(payload: Any, as_json: bool, render) -> int:
 
 
 def _status_text(payload: dict[str, Any]) -> str:
+    listener = payload.get("listener") or {}
+    kind = listener.get("type") or "local"
+    mode = listener.get("mode") or "local"
+    encrypted = "encrypted" if listener.get("encrypted") else "not encrypted"
     return (
         f"workspace={payload['workspace_id']} version={payload['version']} path={payload['path']}\n"
+        f"transport={kind} ({mode}, {encrypted})\n"
     )
 
 

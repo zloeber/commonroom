@@ -71,6 +71,22 @@ class InvitationRevoked(CommonroomError):
         super().__init__(message, **details)
 
 
+class InvitationRedeemed(CommonroomError):
+    code = "invitation_redeemed"
+    http_status = 403
+
+    def __init__(self, message: str = "invite already redeemed", **details: Any) -> None:
+        super().__init__(message, **details)
+
+
+class UnsupportedVersion(CommonroomError):
+    code = "unsupported_version"
+    http_status = 400
+
+    def __init__(self, message: str = "unsupported invitation version", **details: Any) -> None:
+        super().__init__(message, **details)
+
+
 class SessionExpired(CommonroomError):
     code = "session_expired"
     http_status = 401

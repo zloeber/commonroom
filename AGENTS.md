@@ -150,7 +150,8 @@ commonroom ./idea.md
 commonroom ./idea.md --tailcat
 commonroom serve ./idea.md --transport <plugin>
 commonroom invite --workspace ./idea.md
-commonroom join 'commonroom://join/...' --name 'Agent A'
+commonroom join 'commonroom://join/...' --name 'Agent A' --no-hold
+commonroom call 'commonroom://join/...' GET /workspace/status --session '<session_id>'
 ```
 
 `--ephemeral` keeps metadata in a temp directory and deletes it on exit. The markdown file remains.

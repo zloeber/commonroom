@@ -81,9 +81,11 @@ def render_banner(snapshot: dict[str, Any]) -> str:
             [
                 "Transport:",
                 f"  {listener['type']} ({listener.get('mode', 'local')}, {encrypted})",
-                "",
             ]
         )
+        if listener.get("mode") == "private" and listener.get("encrypted"):
+            lines.append("  Status: READY")
+        lines.append("")
     if snapshot.get("invite"):
         lines.extend(["Invite:", f"  {snapshot['invite']}", ""])
     lines.append("Participants:")
