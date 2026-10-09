@@ -40,9 +40,9 @@ tasks:
     cmds:
       - uv run commonroom serve ./workspace.md
 
-  docs:
-    cmds:
-      - uv run python -c "print('Docs: README.md and docs/architecture.md')"
+  # docs:
+  #   cmds:
+  #     - uv run python -c "print('Docs: README.md and docs/architecture.md')"
 
   clean:
     cmds:
