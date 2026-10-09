@@ -46,6 +46,7 @@ class TailcatTransport:
         self._proc: subprocess.Popen[str] | None = None
         self._server: socket.socket | None = None
         self._drain: threading.Thread | None = None
+        self._output: list[str] = []
 
     def capabilities(self) -> frozenset[str]:
         return frozenset(
@@ -102,6 +103,7 @@ class TailcatTransport:
         self._require_binary()
         self.address = address
         self.port = remote_port
+        self._output = []
         self._proc = self._popen(self.forward_command(address, local_port, remote_port))
         self._start_drain()
         if not _wait_until_accepts(local_port, self.timeout_seconds):
@@ -113,6 +115,7 @@ class TailcatTransport:
         try:
             sock = socket.create_connection(("127.0.0.1", local_port), timeout=self.timeout_seconds)
         except OSError as exc:
+            self.close()
             raise TransportUnavailable("connect failed") from exc
         return SocketConnection(sock, timeout=self.timeout_seconds)
 
@@ -146,9 +149,26 @@ class TailcatTransport:
     def _start_serve(self, port: int) -> None:
         self._require_binary()
         self.port = port
+        self._output = []
         self._proc = self._popen(self.serve_command(port))
-        self.address = self._read_endpoint()
-        self._start_drain()
+        try:
+            self.address = self._read_endpoint()
+            if self._proc is None or self._proc.poll() is not None:
+                raise TransportUnavailable(
+                    "transport exited during startup",
+                    output=redact("".join(self._output))[-1000:],
+                )
+            self._start_drain()
+            # A line with an address is not readiness. Bail if the process dies immediately.
+            time.sleep(min(0.3, self.timeout_seconds))
+            if self._proc is None or self._proc.poll() is not None:
+                raise TransportUnavailable(
+                    "transport exited during startup",
+                    output="".join(self._output)[-1000:],
+                )
+        except Exception:
+            self.close()
+            raise
 
     def _require_binary(self) -> None:
         if os.path.isabs(self.binary) and os.path.exists(self.binary):
@@ -175,13 +195,20 @@ class TailcatTransport:
         collected: list[str] = []
         while time.monotonic() < deadline:
             if proc.poll() is not None:
-                collected.append(proc.stdout.read() or "")
+                rest = proc.stdout.read() or ""
+                collected.append(rest)
+                if rest:
+                    self._output.append(redact(rest))
+                endpoint = parse_endpoint(rest)
+                if endpoint:
+                    return endpoint
                 break
             line = proc.stdout.readline()
             if not line:
                 time.sleep(0.05)
                 continue
             collected.append(line)
+            self._output.append(redact(line))
             endpoint = parse_endpoint(line)
             if endpoint:
                 return endpoint
@@ -199,24 +226,32 @@ class TailcatTransport:
         def _drain() -> None:
             assert proc.stdout is not None
             for line in proc.stdout:
-                redact(line)
+                self._output.append(redact(line))
+                if len(self._output) > 40:
+                    del self._output[:10]
 
         self._drain = threading.Thread(target=_drain, name="transport-output", daemon=True)
         self._drain.start()
 
     def _stop_and_collect(self) -> str:
+        """Stop the child and return redacted output.
+
+        The drain thread already owns stdout. Calling communicate() here would
+        deadlock against that reader, so termination only signals the process.
+        """
         proc = self._proc
-        if proc is None:
-            return ""
-        if proc.poll() is None:
-            proc.terminate()
-        try:
-            output, _ = proc.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            output, _ = proc.communicate(timeout=3)
+        drain = self._drain
         self._proc = None
-        return output or ""
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
+        if drain is not None:
+            drain.join(timeout=1)
+        return "".join(self._output)
 
 
 def plugin(**kwargs: Any) -> TailcatTransport:

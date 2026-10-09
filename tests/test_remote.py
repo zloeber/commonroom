@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import socket
 from pathlib import Path
 
 import httpx
 
+from commonroom.cli import main
 from commonroom.client import http_exchange
 from commonroom.engine import WorkspaceEngine
 from commonroom.protocol import INVITATION_PREFIX, decode_invitation
@@ -150,6 +152,177 @@ def test_remote_participant_over_the_transport(tmp_path: Path) -> None:
         reloaded.close()
 
 
+def test_cli_call_joins_proposes_and_rejects_a_replay(tmp_path: Path, capsys) -> None:
+    workspace = tmp_path / "idea.md"
+    workspace.write_text("# Architecture\n\n## Goals\n\nship\n", encoding="utf-8")
+    engine = WorkspaceEngine(workspace)
+    room = start_room(engine, port=_port(), name="Zach", transport=LoopbackTransport())
+    try:
+        uri = room.invite["uri"]
+        assert (
+            main(["join", uri, "--name", "Agent B", "--kind", "agent", "--json", "--no-hold"]) == 0
+        )
+        joined = json.loads(capsys.readouterr().out)
+        session = joined["session_id"]
+        assert joined["workspace_id"] == decode_invitation(uri)["workspace_id"]
+        assert any(person["name"] == "Agent B" for person in engine.participants())
+
+        assert main(["call", uri, "GET", "/workspace/summary", "--session", session]) == 0
+        summary = json.loads(capsys.readouterr().out)
+        assert summary["status"] == 200
+        assert summary["body"]["version"] == 1
+
+        proposal_body = json.dumps(
+            {
+                "target": "section:Goals",
+                "base_version": 1,
+                "summary": "name the outcome",
+                "change": {"section": "Goals", "content": "## Goals\n\nship together\n"},
+            }
+        )
+        assert (
+            main(
+                [
+                    "call",
+                    uri,
+                    "POST",
+                    "/workspace/propose",
+                    "--session",
+                    session,
+                    "--body",
+                    proposal_body,
+                ]
+            )
+            == 0
+        )
+        proposed = json.loads(capsys.readouterr().out)
+        proposal_id = proposed["body"]["proposal_id"]
+
+        review_body = json.dumps({"proposal_id": proposal_id, "approve": True})
+        assert (
+            main(
+                [
+                    "call",
+                    uri,
+                    "POST",
+                    "/workspace/proposal/review",
+                    "--session",
+                    session,
+                    "--body",
+                    review_body,
+                ]
+            )
+            == 1
+        )
+        denied = json.loads(capsys.readouterr().out)
+        assert denied["body"]["error"] == "permission_denied"
+
+        assert main(["join", uri, "--name", "Other", "--json", "--no-hold"]) == 1
+        replay = json.loads(capsys.readouterr().out)
+        assert replay["error"] == "invitation_redeemed"
+        assert engine.list_invites()[0]["used_count"] == 1
+
+        with httpx.Client(base_url=room.local_url) as human:
+            assert human.get("/").status_code == 200
+            approved = human.post(
+                "/workspace/proposal/review",
+                json={"proposal_id": proposal_id, "approve": True},
+            )
+            assert approved.status_code == 200
+
+        assert (
+            main(
+                [
+                    "call",
+                    uri,
+                    "POST",
+                    "/workspace/commit",
+                    "--session",
+                    session,
+                    "--body",
+                    json.dumps({"proposal_id": proposal_id}),
+                ]
+            )
+            == 0
+        )
+        assert "ship together" in workspace.read_text(encoding="utf-8")
+    finally:
+        room.shutdown()
+        engine.close()
+
+
+def test_failed_dial_does_not_spend_the_invitation(tmp_path: Path) -> None:
+    workspace = tmp_path / "idea.md"
+    workspace.write_text("# Architecture\n", encoding="utf-8")
+    engine = WorkspaceEngine(workspace)
+    engine.set_transport(
+        {
+            "type": "loopback",
+            "address": "127.0.0.1",
+            "port": 1,
+            "encrypted": False,
+            "mode": "local",
+        }
+    )
+    invite = engine.create_invite()
+    try:
+        assert main(["join", invite["uri"], "--name", "Agent", "--no-hold", "--json"]) == 1
+        assert engine.list_invites()[0]["used_count"] == 0
+    finally:
+        engine.close()
+
+
+def test_join_rejects_malformed_and_unsupported_invitations(capsys) -> None:
+    assert main(["join", "commonroom://join/$$$$", "--name", "Agent", "--no-hold"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "invalid_request"
+    document = {
+        "protocol": "commonroom",
+        "version": "9",
+        "transport": {"type": "loopback", "address": "127.0.0.1", "port": 1},
+        "workspace_id": "workspace_x",
+        "secret": "secret",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+        "capabilities": ["read"],
+    }
+    assert main(["join", json.dumps(document), "--name", "Agent", "--no-hold"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "unsupported_version"
+
+
+def test_status_hides_the_transport_address(tmp_path: Path, capsys) -> None:
+    workspace = tmp_path / "idea.md"
+    workspace.write_text("# Architecture\n", encoding="utf-8")
+    engine = WorkspaceEngine(workspace)
+    engine.set_transport(
+        {
+            "type": "loopback",
+            "address": "secret-endpoint",
+            "port": 9,
+            "encrypted": False,
+            "mode": "local",
+        }
+    )
+    engine.close()
+    assert main(["status", "--workspace", str(workspace), "--json"]) == 0
+    text = capsys.readouterr().out
+    assert "secret-endpoint" not in text
+    assert json.loads(text)["listener"]["type"] == "loopback"
+
+
+def test_local_room_does_not_need_tailcat(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COMMONROOM_TAILCAT", "/no/such/tailcat")
+    workspace = tmp_path / "idea.md"
+    workspace.write_text("# Architecture\n", encoding="utf-8")
+    engine = WorkspaceEngine(workspace)
+    room = start_room(engine, port=_port(), name="Zach")
+    try:
+        document = decode_invitation(room.invite["uri"])
+        assert document["transport"]["type"] == "loopback"
+        assert document["transport"]["address"] == "127.0.0.1"
+    finally:
+        room.shutdown()
+        engine.close()
+
+
 def test_banner_hides_the_endpoint() -> None:
     text = render_banner(
         {
@@ -165,3 +338,18 @@ def test_banner_hides_the_endpoint() -> None:
     assert "commonroom://join/abc" in text
     assert "Zach" in text
     assert "tailcat://" not in text
+    assert "Status: READY" not in text
+
+    private = render_banner(
+        {
+            "name": "idea",
+            "version": 3,
+            "lifecycle": "ACTIVE",
+            "local_url": "http://127.0.0.1:8000",
+            "invite": "commonroom://join/abc",
+            "listener": {"type": "private", "mode": "private", "encrypted": True},
+            "participants": [],
+        }
+    )
+    assert "Status: READY" in private
+    assert "127.0.0.1:8000" in private

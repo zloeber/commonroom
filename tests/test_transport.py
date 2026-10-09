@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import threading
 from pathlib import Path
 
@@ -142,6 +143,59 @@ def test_tailcat_plugin_is_loaded_only_when_requested() -> None:
     except TransportUnavailable:
         pass
     assert "commonroom.transport.plugins.tailcat" in sys.modules
+
+
+def _fake_binary(tmp_path: Path, body: str) -> str:
+    path = tmp_path / "tailcat"
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_missing_tailcat_binary_is_unavailable() -> None:
+    from commonroom.transport.plugins.tailcat import TailcatTransport
+
+    plugin = TailcatTransport(binary="/no/such/tailcat-binary")
+    with pytest.raises(TransportUnavailable, match="not available"):
+        plugin.expose(9)
+
+
+def test_tailcat_exit_after_address_is_not_ready(tmp_path: Path) -> None:
+    from commonroom.transport.plugins.tailcat import TailcatTransport
+
+    binary = _fake_binary(
+        tmp_path,
+        "#!/bin/sh\necho 'Server listening with new address: tcABCDEFGHIJKLMNOPQRSTUV'\nexit 1\n",
+    )
+    plugin = TailcatTransport(binary=binary, timeout_seconds=2)
+    with pytest.raises(TransportUnavailable, match="exited during startup"):
+        plugin.expose(9)
+    plugin.close()
+
+
+def test_tailcat_forward_failure_kills_the_child(tmp_path: Path) -> None:
+    from commonroom.transport.plugins.tailcat import TailcatTransport, redact
+
+    pidfile = tmp_path / "pid"
+    binary = _fake_binary(
+        tmp_path,
+        f"#!/bin/sh\necho $$ > {pidfile}\nexec sleep 30\n",
+    )
+    plugin = TailcatTransport(binary=binary, timeout_seconds=0.4)
+    with pytest.raises(TransportUnavailable, match="did not open"):
+        plugin.connect(
+            {
+                "type": "tailcat",
+                "address": "tcABCDEFGHIJKLMNOPQRSTUV",
+                "port": 9,
+            }
+        )
+    plugin.close()
+    assert pidfile.exists()
+    pid = int(pidfile.read_text(encoding="utf-8").strip())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    assert "tcSECRETADDRESSVALUE1234" not in redact("noise tcSECRETADDRESSVALUE1234 end")
 
 
 def test_core_modules_do_not_name_transport_vendors() -> None:

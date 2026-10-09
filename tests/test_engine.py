@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from commonroom.engine import WorkspaceConflictError, WorkspaceEngine
+from commonroom.errors import InvitationRedeemed, Unauthorized
 
 
 def _engine(tmp_path: Path, content: str = "# Architecture\ninitial\n") -> WorkspaceEngine:
@@ -100,6 +101,19 @@ def test_invite_expired_and_revoked(tmp_path: Path) -> None:
     engine.revoke_invite(valid["token"])
     with pytest.raises(ValueError, match="revoked"):
         engine.join(kind="agent", name="blocked", invite_token=valid["token"])
+
+
+def test_spent_invite_is_rejected_and_secrets_stay_out_of_history(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    invite = engine.create_invite(expires_in_minutes=10, max_uses=1)
+    engine.join(kind="agent", name="first", invite_token=invite["token"])
+    with pytest.raises(InvitationRedeemed):
+        engine.join(kind="agent", name="replay", invite_token=invite["token"])
+    with pytest.raises(Unauthorized):
+        engine.join(kind="agent", name="wrong", invite_token="not-the-secret")
+    blob = "".join(str(event) for event in engine.history())
+    assert invite["token"] not in blob
+    assert "not-the-secret" not in blob
 
 
 def test_summary_and_changes_since_are_bounded(tmp_path: Path) -> None:

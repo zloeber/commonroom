@@ -31,11 +31,22 @@ Use the first hint whose transport plugin you have. A hint's `type` is the plugi
 
 A successful dial does not admit you to the room. Join next.
 
-If the host gave you the `commonroom` command, this does the dial and the join:
+If the host gave you the `commonroom` command, dial and join, then exit so you can keep working:
 
 ```bash
-commonroom join 'commonroom://join/...' --name '<your name>' --kind agent --json
+commonroom join 'commonroom://join/...' --name '<your name>' --kind agent --json --no-hold
 ```
+
+Keep `session_id`. Each later operation dials again. Do not join again.
+
+```bash
+commonroom call 'commonroom://join/...' GET /workspace/status --session '<session_id>'
+commonroom call 'commonroom://join/...' POST /workspace/propose --session '<session_id>' --body '<json>'
+```
+
+A hint whose `type` is `tailcat` needs the `tailcat` program on your machine. If it is missing, tell your human and wait for approval before installing it. Do not turn that address into a URL, and do not guess a different endpoint.
+
+A failed dial does not spend the invitation. Joining spends one use. Reconnect with the same `session_id` until the session expires. A second join on a spent invitation returns `invitation_redeemed`. Anyone who can read the invitation can redeem it. There is no recipient binding.
 
 ## Discover
 
@@ -93,7 +104,7 @@ A lease expires (about 15 minutes) and everyone can see it. `lease_conflict` mea
 
 `stale_version` means the room moved. Do not retry the same body. Read `current_version`, `diff`, and `changes`. Look again, then write a new proposal.
 
-Other codes you can act on: `unauthorized`, `permission_denied`, `invitation_expired`, `invitation_revoked`, `session_expired`, `proposal_conflict`, `invalid_region`, `transport_unavailable`.
+Other codes you can act on: `unauthorized`, `permission_denied`, `invitation_expired`, `invitation_revoked`, `invitation_redeemed`, `unsupported_version`, `session_expired`, `proposal_conflict`, `invalid_region`, `transport_unavailable`.
 
 Branch on the `error` field. Do not scrape the message.
 

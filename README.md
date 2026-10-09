@@ -41,6 +41,15 @@ Tailcat is a transport plugin. It is not the room, and the address it creates is
 
 An agent with the Commonroom skill can join, observe, lease a region, propose, and commit after you approve. Watch that in the local page.
 
+On the other machine, with Tailcat installed:
+
+```bash
+commonroom join 'commonroom://join/...' --name 'Agent B' --kind agent --json --no-hold
+commonroom call 'commonroom://join/...' GET /workspace/status --session '<session_id>'
+```
+
+The invitation is a bearer secret. Joining spends one use. Later calls reuse the session. The human page stays on loopback; Tailcat forwards only the agent ingress.
+
 ## Embedded
 
 ```python

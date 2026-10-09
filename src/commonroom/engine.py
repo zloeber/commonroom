@@ -22,6 +22,7 @@ from commonroom.errors import (
     InvalidRegion,
     InvalidRequest,
     InvitationExpired,
+    InvitationRedeemed,
     InvitationRevoked,
     LeaseConflict,
     LimitExceeded,
@@ -1469,8 +1470,9 @@ class WorkspaceEngine:
         if self._parse_time(str(row["expires_at"])) < self._now():
             raise InvitationExpired()
         max_uses = row["max_uses"]
-        if max_uses is not None and int(row["used_count"]) >= int(max_uses):
-            raise LimitExceeded("invite usage limit reached")
+        used = int(row["used_count"])
+        if max_uses is not None and used >= int(max_uses):
+            _raise_invite_exhausted(used)
         updated = self._conn.execute(
             """
             UPDATE invites SET used_count = used_count + 1
@@ -1481,12 +1483,28 @@ class WorkspaceEngine:
         )
         self._conn.commit()
         if updated.rowcount != 1:
-            raise LimitExceeded("invite usage limit reached")
+            again = self._conn.execute(
+                "SELECT used_count, revoked_at, expires_at FROM invites WHERE token = ?",
+                (token,),
+            ).fetchone()
+            if again is None:
+                raise Unauthorized("invite not found")
+            if again["revoked_at"] is not None:
+                raise InvitationRevoked()
+            if self._parse_time(str(again["expires_at"])) < self._now():
+                raise InvitationExpired()
+            _raise_invite_exhausted(int(again["used_count"]))
         return {
             "token": token,
             "capabilities": self._invite_capabilities(row),
             "target": row["target"],
         }
+
+
+def _raise_invite_exhausted(used: int) -> None:
+    if used > 0:
+        raise InvitationRedeemed()
+    raise LimitExceeded("invite usage limit reached")
 
 
 def _pid_alive(pid: int) -> bool:

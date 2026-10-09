@@ -47,6 +47,8 @@ ERROR_CODES = [
     "permission_denied",
     "invitation_expired",
     "invitation_revoked",
+    "invitation_redeemed",
+    "unsupported_version",
     "session_expired",
     "lease_conflict",
     "stale_version",
