@@ -1,4 +1,8 @@
-# Commonroom
+# Commonroom™
+
+
+
+![Commonroom™ logo](docs/inc/logo-commonroom.png)
 
 Commonroom opens a temporary room around something you already have on your computer. Another person, or an agent acting for them, can enter, see who is working, reserve a section, and propose changes. The file stays yours.
 
@@ -16,6 +20,8 @@ Or:
 ```bash
 uv sync --all-extras
 ```
+
+
 
 ## Open a room
 

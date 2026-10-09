@@ -1,6 +1,24 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
 version: "3"
 
+includes:
+  github:
+    taskfile: ./tasks/Taskfile.github.yml
+    optional: true
+
+vars:
+  ROOT:
+    sh: git rev-parse --show-toplevel
+
 tasks:
+  default:
+    desc: List the verb surface
+    cmds:
+      - task --list
+    silent: true
+
+
   install:
     cmds:
       - uv sync --all-extras
@@ -40,9 +58,9 @@ tasks:
     cmds:
       - uv run commonroom serve ./workspace.md
 
-  docs:
-    cmds:
-      - uv run python -c "print('Docs: README.md and docs/architecture.md')"
+  # docs:
+  #   cmds:
+  #     - uv run python -c "print('Docs: README.md and docs/architecture.md')"
 
   clean:
     cmds:
